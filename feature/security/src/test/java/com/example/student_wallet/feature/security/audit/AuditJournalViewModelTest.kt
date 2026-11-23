@@ -7,6 +7,7 @@ import com.example.student_wallet.core.domain.model.Transaction
 import com.example.student_wallet.core.domain.model.UserSettings
 import com.example.student_wallet.core.domain.repository.SettingsRepository
 import com.example.student_wallet.core.domain.repository.TransactionRepository
+import com.example.student_wallet.feature.security.di.securityModule
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
@@ -24,6 +25,8 @@ import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import org.koin.dsl.koinApplication
+import org.koin.dsl.module
 import java.time.LocalDate
 import java.time.YearMonth
 
@@ -81,6 +84,23 @@ class AuditJournalViewModelTest {
         advanceUntilIdle()
         assertEquals(fixedMonth, viewModel.uiState.value.selectedMonth)
         collectJob.cancel()
+    }
+
+    @Test
+    fun `securityModule resolves AuditJournalViewModel via Koin without missing defaults`() {
+        val coreDepsModule = module {
+            single<TransactionRepository> { EmptyTransactionRepository() }
+            single<SettingsRepository> { FakeSettingsRepository() }
+        }
+        val koinApp = koinApplication {
+            modules(coreDepsModule, securityModule)
+        }
+        try {
+            val resolved = koinApp.koin.get<AuditJournalViewModel>()
+            assertEquals(YearMonth.now(), resolved.uiState.value.selectedMonth)
+        } finally {
+            koinApp.close()
+        }
     }
 
     private class EmptyTransactionRepository : TransactionRepository {
