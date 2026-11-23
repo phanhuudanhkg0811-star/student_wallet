@@ -26,4 +26,5 @@ android {
 dependencies {
     implementation(project(":core"))
     testImplementation(libs.junit)
+    testImplementation(libs.kotlinx.coroutines.test)
 }

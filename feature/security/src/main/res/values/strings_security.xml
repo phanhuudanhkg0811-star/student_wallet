@@ -1,0 +1,10 @@
+<resources>
+    <string name="security_title">Cài đặt &amp; Bảo mật</string>
+    <string name="security_subtitle">Tùy biến giao diện, tiền tệ và xuất báo cáo cá nhân</string>
+    <string name="security_appearance_section">Giao diện &amp; Hiển thị</string>
+    <string name="security_currency_section">Đơn vị tiền tệ</string>
+    <string name="security_export_section">Xuất báo cáo cá nhân</string>
+    <string name="security_roadmap_section">Bảo mật &amp; Kỷ luật tài chính</string>
+    <string name="security_save_file">Lưu về máy</string>
+    <string name="security_share_file">Chia sẻ</string>
+</resources>
