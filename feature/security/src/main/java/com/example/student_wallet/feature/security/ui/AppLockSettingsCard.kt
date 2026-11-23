@@ -1,5 +1,9 @@
 package com.example.student_wallet.feature.security.ui
 
+import android.content.Context
+import android.content.Intent
+import android.os.Build
+import android.provider.Settings
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -27,6 +31,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -134,6 +139,18 @@ internal fun AppLockSettingsCard(
                     )
                 }
 
+                if (biometricAvailability == BiometricAvailability.NOT_ENROLLED) {
+                    val context = LocalContext.current
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        TextButton(onClick = { openBiometricEnrollmentSettings(context) }) {
+                            Text("Cài đặt vân tay trên thiết bị")
+                        }
+                    }
+                }
+
                 HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f))
 
                 Row(
@@ -198,4 +215,16 @@ internal fun AppLockSettingsCard(
             }
         }
     }
+}
+
+private fun openBiometricEnrollmentSettings(context: Context) {
+    val enrollIntent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+        Intent(Settings.ACTION_BIOMETRIC_ENROLL)
+    } else {
+        Intent(Settings.ACTION_SECURITY_SETTINGS)
+    }
+    runCatching { context.startActivity(enrollIntent) }
+        .onFailure {
+            runCatching { context.startActivity(Intent(Settings.ACTION_SECURITY_SETTINGS)) }
+        }
 }

@@ -48,6 +48,7 @@ import com.example.student_wallet.feature.budget.BudgetScreen
 import com.example.student_wallet.feature.group.GroupScreen
 import com.example.student_wallet.feature.scanner.ScannerScreen
 import com.example.student_wallet.feature.security.SecurityScreen
+import com.example.student_wallet.feature.security.audit.AuditJournalScreen
 import com.example.student_wallet.feature.security.lock.AppLockManager
 import com.example.student_wallet.feature.security.ui.AppLockOverlayRoute
 import com.example.student_wallet.feature.transaction.TransactionScreen
@@ -61,6 +62,7 @@ private object AppRoutes {
     const val GROUP = "group"
     const val SECURITY = "security"
     const val SCANNER = "scanner"
+    const val AUDIT_JOURNAL = "audit_journal"
 }
 
 private data class BottomNavTab(
@@ -199,8 +201,17 @@ fun StudentWalletMainScreen(settings: UserSettings) {
             composable(AppRoutes.TRANSACTION) { TransactionScreen() }
             composable(AppRoutes.BUDGET) { BudgetScreen() }
             composable(AppRoutes.GROUP) { GroupScreen() }
-            composable(AppRoutes.SECURITY) { SecurityScreen() }
+            composable(AppRoutes.SECURITY) {
+                SecurityScreen(
+                    onOpenAuditJournal = {
+                        navController.navigate(AppRoutes.AUDIT_JOURNAL) { launchSingleTop = true }
+                    },
+                )
+            }
             composable(AppRoutes.SCANNER) { ScannerScreen() }
+            composable(AppRoutes.AUDIT_JOURNAL) {
+                AuditJournalScreen(onBack = { navController.popBackStack() })
+            }
         }
     }
 }

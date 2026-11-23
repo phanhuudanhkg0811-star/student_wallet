@@ -2,6 +2,7 @@ package com.example.student_wallet.feature.security.di
 
 import android.os.SystemClock
 import com.example.student_wallet.feature.security.SecurityViewModel
+import com.example.student_wallet.feature.security.audit.AuditJournalViewModel
 import com.example.student_wallet.feature.security.crypto.KeystoreSecretProtector
 import com.example.student_wallet.feature.security.crypto.PinHasher
 import com.example.student_wallet.feature.security.crypto.SecretProtector
@@ -12,6 +13,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import org.koin.android.ext.koin.androidContext
+import org.koin.core.module.dsl.viewModel
 import org.koin.core.module.dsl.viewModelOf
 import org.koin.dsl.module
 
@@ -30,4 +32,10 @@ val securityModule = module {
     }
 
     viewModelOf(::SecurityViewModel)
+    viewModel {
+        AuditJournalViewModel(
+            transactionRepository = get(),
+            settingsRepository = get(),
+        )
+    }
 }
