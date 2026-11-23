@@ -29,7 +29,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.Insights
 import androidx.compose.material.icons.filled.LightMode
 import androidx.compose.material.icons.filled.Palette
@@ -74,6 +73,10 @@ import com.example.student_wallet.core.domain.model.UserSettings
 import com.example.student_wallet.core.ui.components.SectionHeader
 import com.example.student_wallet.core.ui.theme.Student_walletTheme
 import com.example.student_wallet.core.ui.theme.financeColors
+import com.example.student_wallet.feature.security.biometric.BiometricAvailability
+import com.example.student_wallet.feature.security.biometric.BiometricPromptHelper
+import com.example.student_wallet.feature.security.ui.AppLockSettingsCard
+import com.example.student_wallet.feature.security.ui.PinSetupSheet
 import org.koin.compose.viewmodel.koinViewModel
 import java.io.File
 
@@ -85,6 +88,9 @@ fun SecurityScreen(
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
+    val biometricAvailability = remember(context) {
+        BiometricPromptHelper.checkAvailability(context)
+    }
 
     val createDocumentLauncher = rememberLauncherForActivityResult(
         contract = CreateExportDocumentContract,
@@ -114,15 +120,33 @@ fun SecurityScreen(
 
     SecurityContent(
         uiState = uiState,
+        biometricAvailability = biometricAvailability,
         onIntent = viewModel::onIntent,
         snackbarHostState = snackbarHostState,
         modifier = modifier,
     )
+
+    uiState.activePinDialog?.let { mode ->
+        PinSetupSheet(
+            mode = mode,
+            externalError = uiState.pinDialogError,
+            isProcessing = uiState.isProcessingPin,
+            onDismiss = { viewModel.onIntent(SecurityIntent.DismissPinDialog) },
+            onSubmitCreate = { newPin -> viewModel.onIntent(SecurityIntent.SubmitCreatePin(newPin)) },
+            onSubmitChange = { oldPin, newPin ->
+                viewModel.onIntent(SecurityIntent.SubmitChangePin(oldPin, newPin))
+            },
+            onSubmitDisable = { currentPin ->
+                viewModel.onIntent(SecurityIntent.SubmitDisablePin(currentPin))
+            },
+        )
+    }
 }
 
 @Composable
 internal fun SecurityContent(
     uiState: SecurityUiState,
+    biometricAvailability: BiometricAvailability,
     onIntent: (SecurityIntent) -> Unit,
     snackbarHostState: SnackbarHostState,
     modifier: Modifier = Modifier,
@@ -167,6 +191,19 @@ internal fun SecurityContent(
                 CurrencySettingsCard(
                     selectedCurrency = uiState.settings.currency,
                     onSelectCurrency = { onIntent(SecurityIntent.SelectCurrency(it)) },
+                )
+            }
+
+            item {
+                AppLockSettingsCard(
+                    lockState = uiState.lockState,
+                    biometricAvailability = biometricAvailability,
+                    onIntent = onIntent,
+                    cardContainer = { SettingsCard(content = it) },
+                    badgeIcon = { icon, container, content -> IconBadge(icon, container, content) },
+                    selectablePill = { label, selected, onClick, itemMod ->
+                        SelectablePill(label = label, selected = selected, onClick = onClick, modifier = itemMod)
+                    },
                 )
             }
 
@@ -458,12 +495,6 @@ private fun SecurityRoadmapCard() {
         SectionHeader(title = stringResource(R.string.security_roadmap_section))
         SettingsCard {
             RoadmapFeatureRow(
-                icon = Icons.Filled.Fingerprint,
-                title = "Khóa ứng dụng PIN & Vân tay",
-                subtitle = "Feature 28 · BiometricPrompt + PBKDF2 + Auto-lock 30s",
-            )
-            HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f))
-            RoadmapFeatureRow(
                 icon = Icons.Filled.CloudUpload,
                 title = "Sao lưu & Khôi phục mã hóa (.wallet)",
                 subtitle = "Feature 29 · AES-256 CBC + SHA-256 checksum",
@@ -704,6 +735,7 @@ private fun SecurityScreenPreview() {
                     netBalance = 2_550_000L,
                 ),
             ),
+            biometricAvailability = BiometricAvailability.AVAILABLE,
             onIntent = {},
             snackbarHostState = SnackbarHostState(),
         )
