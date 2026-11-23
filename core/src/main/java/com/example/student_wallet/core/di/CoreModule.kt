@@ -2,9 +2,11 @@ package com.example.student_wallet.core.di
 
 import androidx.room.Room
 import com.example.student_wallet.core.data.datastore.DataStoreSettingsRepository
+import com.example.student_wallet.core.data.export.AndroidReportExporter
 import com.example.student_wallet.core.data.local.AppDatabase
 import com.example.student_wallet.core.data.local.DatabaseSeedCallback
 import com.example.student_wallet.core.data.repository.OfflineTransactionRepository
+import com.example.student_wallet.core.domain.export.ReportExporter
 import com.example.student_wallet.core.domain.repository.SettingsRepository
 import com.example.student_wallet.core.domain.repository.TransactionRepository
 import org.koin.android.ext.koin.androidContext
@@ -33,5 +35,9 @@ val coreModule = module {
 
     single<SettingsRepository> {
         DataStoreSettingsRepository(context = androidContext())
+    }
+
+    single<ReportExporter> {
+        AndroidReportExporter(context = androidContext())
     }
 }
