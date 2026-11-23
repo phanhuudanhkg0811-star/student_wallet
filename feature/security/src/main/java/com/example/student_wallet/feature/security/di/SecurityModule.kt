@@ -2,6 +2,7 @@ package com.example.student_wallet.feature.security.di
 
 import android.os.SystemClock
 import com.example.student_wallet.feature.security.SecurityViewModel
+import com.example.student_wallet.feature.security.audit.AuditJournalViewModel
 import com.example.student_wallet.feature.security.crypto.KeystoreSecretProtector
 import com.example.student_wallet.feature.security.crypto.PinHasher
 import com.example.student_wallet.feature.security.crypto.SecretProtector
@@ -30,4 +31,5 @@ val securityModule = module {
     }
 
     viewModelOf(::SecurityViewModel)
+    viewModelOf(::AuditJournalViewModel)
 }

@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Download
@@ -48,9 +49,12 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -64,6 +68,9 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.core.content.FileProvider
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.student_wallet.core.domain.export.ExportFormat
 import com.example.student_wallet.core.domain.format.MoneyFormatter
@@ -83,13 +90,25 @@ import java.io.File
 @Composable
 fun SecurityScreen(
     modifier: Modifier = Modifier,
+    onOpenAuditJournal: () -> Unit = {},
     viewModel: SecurityViewModel = koinViewModel(),
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
-    val biometricAvailability = remember(context) {
-        BiometricPromptHelper.checkAvailability(context)
+    val lifecycleOwner = LocalLifecycleOwner.current
+    var biometricAvailability by remember(context) {
+        mutableStateOf(BiometricPromptHelper.checkAvailability(context))
+    }
+
+    DisposableEffect(lifecycleOwner, context) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                biometricAvailability = BiometricPromptHelper.checkAvailability(context)
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     val createDocumentLauncher = rememberLauncherForActivityResult(
@@ -122,6 +141,7 @@ fun SecurityScreen(
         uiState = uiState,
         biometricAvailability = biometricAvailability,
         onIntent = viewModel::onIntent,
+        onOpenAuditJournal = onOpenAuditJournal,
         snackbarHostState = snackbarHostState,
         modifier = modifier,
     )
@@ -148,6 +168,7 @@ internal fun SecurityContent(
     uiState: SecurityUiState,
     biometricAvailability: BiometricAvailability,
     onIntent: (SecurityIntent) -> Unit,
+    onOpenAuditJournal: () -> Unit,
     snackbarHostState: SnackbarHostState,
     modifier: Modifier = Modifier,
 ) {
@@ -215,7 +236,7 @@ internal fun SecurityContent(
             }
 
             item {
-                SecurityRoadmapCard()
+                SecurityRoadmapCard(onOpenAuditJournal = onOpenAuditJournal)
             }
         }
     }
@@ -490,20 +511,47 @@ private fun ExportReportCard(
 }
 
 @Composable
-private fun SecurityRoadmapCard() {
+private fun SecurityRoadmapCard(onOpenAuditJournal: () -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
         SectionHeader(title = stringResource(R.string.security_roadmap_section))
         SettingsCard {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .clickable(onClick = onOpenAuditJournal)
+                    .padding(vertical = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                IconBadge(
+                    icon = Icons.Filled.Insights,
+                    containerColor = MaterialTheme.colorScheme.primaryContainer,
+                    contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Nhật ký kỷ luật tài chính",
+                        style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold),
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Text(
+                        text = "Feature 12 · Financial Score 0–100 & Heatmap Calendar",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                Icon(
+                    imageVector = Icons.Filled.ChevronRight,
+                    contentDescription = "Mở Nhật ký kỷ luật",
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+            }
+            HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f))
             RoadmapFeatureRow(
                 icon = Icons.Filled.CloudUpload,
                 title = "Sao lưu & Khôi phục mã hóa (.wallet)",
                 subtitle = "Feature 29 · AES-256 CBC + SHA-256 checksum",
-            )
-            HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f))
-            RoadmapFeatureRow(
-                icon = Icons.Filled.Insights,
-                title = "Nhật ký kỷ luật tài chính",
-                subtitle = "Feature 12 · Financial Score 0–100 & Heatmap Calendar",
             )
         }
     }
@@ -737,6 +785,7 @@ private fun SecurityScreenPreview() {
             ),
             biometricAvailability = BiometricAvailability.AVAILABLE,
             onIntent = {},
+            onOpenAuditJournal = {},
             snackbarHostState = SnackbarHostState(),
         )
     }
