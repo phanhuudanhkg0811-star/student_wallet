@@ -24,19 +24,19 @@ abstract class AppDatabase : RoomDatabase() {
 class DatabaseSeedCallback : RoomDatabase.Callback() {
     override fun onCreate(db: SupportSQLiteDatabase) {
         super.onCreate(db)
-        val defaults = listOf(
-            listOf("Ăn uống", "🍜", "EXPENSE", 0xFF006C51L),
-            listOf("Tiền trọ & điện nước", "🏠", "EXPENSE", 0xFF406376L),
-            listOf("Di chuyển", "🚌", "EXPENSE", 0xFF4C6359L),
-            listOf("Đi chợ / Mua sắm", "🛒", "EXPENSE", 0xFFE08A00L),
-            listOf("Giải trí", "🎮", "EXPENSE", 0xFFBA1A1AL),
-            listOf("Học tập", "📚", "EXPENSE", 0xFF274B5DL),
-            listOf("Trợ cấp / Lương", "💸", "INCOME", 0xFF00855FL),
+        val defaults: List<Array<Any>> = listOf(
+            arrayOf("Ăn uống", "🍜", "EXPENSE", 0xFF006C51L),
+            arrayOf("Tiền trọ & điện nước", "🏠", "EXPENSE", 0xFF406376L),
+            arrayOf("Di chuyển", "🚌", "EXPENSE", 0xFF4C6359L),
+            arrayOf("Đi chợ / Mua sắm", "🛒", "EXPENSE", 0xFFE08A00L),
+            arrayOf("Giải trí", "🎮", "EXPENSE", 0xFFBA1A1AL),
+            arrayOf("Học tập", "📚", "EXPENSE", 0xFF274B5DL),
+            arrayOf("Trợ cấp / Lương", "💸", "INCOME", 0xFF00855FL),
         )
         defaults.forEach { row ->
             db.execSQL(
                 "INSERT INTO categories (name, emoji, type, colorHex) VALUES (?, ?, ?, ?)",
-                row.toTypedArray(),
+                row,
             )
         }
     }
