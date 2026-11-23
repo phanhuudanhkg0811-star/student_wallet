@@ -1,10 +1,13 @@
 package com.example.student_wallet
 
 import android.os.Bundle
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -25,9 +28,11 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
+import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.NavDestination.Companion.hierarchy
 import androidx.navigation.NavGraph.Companion.findStartDestination
@@ -43,6 +48,8 @@ import com.example.student_wallet.feature.budget.BudgetScreen
 import com.example.student_wallet.feature.group.GroupScreen
 import com.example.student_wallet.feature.scanner.ScannerScreen
 import com.example.student_wallet.feature.security.SecurityScreen
+import com.example.student_wallet.feature.security.lock.AppLockManager
+import com.example.student_wallet.feature.security.ui.AppLockOverlayRoute
 import com.example.student_wallet.feature.transaction.TransactionScreen
 import com.example.student_wallet.ui.home.HomeScreen
 import org.koin.compose.koinInject
@@ -70,14 +77,16 @@ private val bottomNavTabs = listOf(
     BottomNavTab(AppRoutes.SECURITY, "Cài đặt", Icons.Filled.Security),
 )
 
-class MainActivity : ComponentActivity() {
+class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
             val settingsRepository: SettingsRepository = koinInject()
+            val appLockManager: AppLockManager = koinInject()
             val settings by settingsRepository.observeSettings()
                 .collectAsStateWithLifecycle(initialValue = UserSettings())
+            val lockState by appLockManager.state.collectAsStateWithLifecycle()
 
             val darkTheme = when (settings.themeMode) {
                 ThemeMode.SYSTEM -> isSystemInDarkTheme()
@@ -89,7 +98,32 @@ class MainActivity : ComponentActivity() {
                 darkTheme = darkTheme,
                 dynamicColor = settings.dynamicColor,
             ) {
-                StudentWalletMainScreen(settings = settings)
+                Box(modifier = Modifier.fillMaxSize()) {
+                    if (lockState.isInitialized) {
+                        StudentWalletMainScreen(settings = settings)
+                    } else {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(MaterialTheme.colorScheme.background),
+                        )
+                    }
+
+                    if (lockState.isInitialized && lockState.isLocked) {
+                        // Intercept touch events so the underlying NavHost cannot be tapped while locked.
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .clickable(
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    indication = null,
+                                    onClick = {},
+                                ),
+                        ) {
+                            AppLockOverlayRoute(appLockManager = appLockManager)
+                        }
+                    }
+                }
             }
         }
     }

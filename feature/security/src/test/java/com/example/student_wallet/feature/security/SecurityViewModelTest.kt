@@ -12,8 +12,15 @@ import com.example.student_wallet.core.domain.model.TransactionType
 import com.example.student_wallet.core.domain.model.UserSettings
 import com.example.student_wallet.core.domain.repository.SettingsRepository
 import com.example.student_wallet.core.domain.repository.TransactionRepository
+import com.example.student_wallet.feature.security.crypto.PinHasher
+import com.example.student_wallet.feature.security.lock.AppLockManager
+import com.example.student_wallet.feature.security.lock.FakeSecretProtector
+import com.example.student_wallet.feature.security.lock.FakeSecurityLockStore
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.first
@@ -25,6 +32,8 @@ import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -37,23 +46,35 @@ import java.nio.charset.StandardCharsets
 class SecurityViewModelTest {
 
     private val testDispatcher = StandardTestDispatcher()
+    private lateinit var lockScope: CoroutineScope
 
     @Before
     fun setUp() {
         Dispatchers.setMain(testDispatcher)
+        lockScope = CoroutineScope(SupervisorJob() + testDispatcher)
     }
 
     @After
     fun tearDown() {
+        lockScope.cancel()
         Dispatchers.resetMain()
     }
+
+    private fun createAppLockManager(): AppLockManager = AppLockManager(
+        lockStore = FakeSecurityLockStore(),
+        pinHasher = PinHasher(defaultIterations = 1_000),
+        secretProtector = FakeSecretProtector(),
+        scope = lockScope,
+        elapsedRealtimeMillis = { 0L },
+        computeDispatcher = testDispatcher,
+    )
 
     @Test
     fun `theme and currency intents update SettingsRepository and state`() = runTest(testDispatcher) {
         val settingsRepo = FakeSettingsRepository()
         val txRepo = FakeTransactionRepository()
         val exporter = FakeReportExporter()
-        val viewModel = SecurityViewModel(settingsRepo, txRepo, exporter)
+        val viewModel = SecurityViewModel(settingsRepo, txRepo, exporter, createAppLockManager())
 
         val collectJob = launch { viewModel.uiState.collect {} }
         advanceUntilIdle()
@@ -66,6 +87,40 @@ class SecurityViewModelTest {
         assertEquals(ThemeMode.DARK, viewModel.uiState.value.settings.themeMode)
         assertTrue(viewModel.uiState.value.settings.dynamicColor)
         assertEquals(CurrencyOption.USD, viewModel.uiState.value.settings.currency)
+        collectJob.cancel()
+    }
+
+    @Test
+    fun `pin create and disable flow updates lockState and closes dialog`() = runTest(testDispatcher) {
+        val viewModel = SecurityViewModel(
+            FakeSettingsRepository(),
+            FakeTransactionRepository(),
+            FakeReportExporter(),
+            createAppLockManager(),
+        )
+
+        val collectJob = launch { viewModel.uiState.collect {} }
+        advanceUntilIdle()
+
+        viewModel.onIntent(SecurityIntent.RequestTogglePinLock)
+        advanceUntilIdle()
+        assertEquals(PinDialogMode.CREATE, viewModel.uiState.value.activePinDialog)
+
+        viewModel.onIntent(SecurityIntent.SubmitCreatePin("135790"))
+        advanceUntilIdle()
+
+        assertTrue(viewModel.uiState.value.lockState.isPinEnabled)
+        assertNull(viewModel.uiState.value.activePinDialog)
+
+        viewModel.onIntent(SecurityIntent.RequestTogglePinLock)
+        advanceUntilIdle()
+        assertEquals(PinDialogMode.DISABLE, viewModel.uiState.value.activePinDialog)
+
+        viewModel.onIntent(SecurityIntent.SubmitDisablePin("135790"))
+        advanceUntilIdle()
+
+        assertFalse(viewModel.uiState.value.lockState.isPinEnabled)
+        assertNull(viewModel.uiState.value.activePinDialog)
         collectJob.cancel()
     }
 
@@ -88,7 +143,7 @@ class SecurityViewModelTest {
             ),
         )
         val exporter = FakeReportExporter()
-        val viewModel = SecurityViewModel(settingsRepo, txRepo, exporter)
+        val viewModel = SecurityViewModel(settingsRepo, txRepo, exporter, createAppLockManager())
 
         val collectJob = launch { viewModel.uiState.collect {} }
         advanceUntilIdle()
