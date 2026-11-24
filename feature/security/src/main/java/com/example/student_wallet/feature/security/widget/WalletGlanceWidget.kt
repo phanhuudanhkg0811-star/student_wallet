@@ -3,10 +3,13 @@ package com.example.student_wallet.feature.security.widget
 import android.content.Context
 import android.content.Intent
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.datastore.preferences.core.Preferences
 import androidx.glance.GlanceId
 import androidx.glance.GlanceModifier
 import androidx.glance.GlanceTheme
@@ -20,6 +23,7 @@ import androidx.glance.appwidget.action.actionStartActivity
 import androidx.glance.appwidget.cornerRadius
 import androidx.glance.appwidget.provideContent
 import androidx.glance.background
+import androidx.glance.currentState
 import androidx.glance.layout.Alignment
 import androidx.glance.layout.Box
 import androidx.glance.layout.Column
@@ -30,6 +34,8 @@ import androidx.glance.layout.fillMaxWidth
 import androidx.glance.layout.height
 import androidx.glance.layout.padding
 import androidx.glance.layout.width
+import androidx.glance.state.GlanceStateDefinition
+import androidx.glance.state.PreferencesGlanceStateDefinition
 import androidx.glance.text.FontWeight
 import androidx.glance.text.Text
 import androidx.glance.text.TextStyle
@@ -39,10 +45,14 @@ import com.example.student_wallet.core.domain.format.MoneyFormatter
 import com.example.student_wallet.core.domain.model.UserSettings
 import com.example.student_wallet.core.domain.repository.SettingsRepository
 import com.example.student_wallet.core.domain.repository.TransactionRepository
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flowOf
 import org.koin.core.context.GlobalContext
 
 class WalletGlanceWidget : GlanceAppWidget() {
+
+    override val stateDefinition: GlanceStateDefinition<*> = PreferencesGlanceStateDefinition
 
     override val sizeMode: SizeMode = SizeMode.Responsive(
         setOf(SIZE_2X2, SIZE_4X1, SIZE_4X2),
@@ -50,15 +60,25 @@ class WalletGlanceWidget : GlanceAppWidget() {
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         val koin = GlobalContext.getOrNull()
-        val transactions = koin?.let { runCatching { it.get<TransactionRepository>().observeTransactions().first() }.getOrNull() }
-            .orEmpty()
-        val settings = koin?.let { runCatching { it.get<SettingsRepository>().observeSettings().first() }.getOrNull() }
-            ?: UserSettings()
+        val txRepo = koin?.let { runCatching { it.get<TransactionRepository>() }.getOrNull() }
+        val settingsRepo = koin?.let { runCatching { it.get<SettingsRepository>() }.getOrNull() }
 
-        val summary = WidgetSummaryCalculator.compute(
-            transactions = transactions,
-            settings = settings,
-        )
+        val summaryFlow = if (txRepo != null && settingsRepo != null) {
+            combine(
+                txRepo.observeTransactions(),
+                settingsRepo.observeSettings(),
+            ) { transactions, settings ->
+                WidgetSummaryCalculator.compute(
+                    transactions = transactions,
+                    settings = settings,
+                )
+            }
+        } else {
+            flowOf(WidgetSummaryCalculator.compute(emptyList(), UserSettings()))
+        }
+
+        val initialSummary = runCatching { summaryFlow.first() }
+            .getOrElse { WidgetSummaryCalculator.compute(emptyList(), UserSettings()) }
 
         val quickAddIntent = Intent(context, QuickAddWidgetActivity::class.java).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
@@ -70,6 +90,13 @@ class WalletGlanceWidget : GlanceAppWidget() {
             ?.let(::actionStartActivity)
 
         provideContent {
+            val prefs = currentState<Preferences>()
+            val refreshNonce = prefs[WalletWidgetUpdater.KEY_REFRESH_NONCE] ?: 0L
+            // Keep collecting Room/DataStore inside provideContent so open Glance sessions never stay stale.
+            val summary by produceState(initialValue = initialSummary, key1 = refreshNonce) {
+                summaryFlow.collect { value = it }
+            }
+
             GlanceTheme {
                 val size = LocalSize.current
                 when {
