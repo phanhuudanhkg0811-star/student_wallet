@@ -82,6 +82,7 @@ class SecurityViewModel(
             }
             is SecurityIntent.SelectCurrency -> launchBlock {
                 settingsRepository.setCurrency(intent.currency)
+                _effects.send(SecurityEffect.RefreshWidgets)
             }
             SecurityIntent.RequestTogglePinLock -> openTogglePinDialog()
             SecurityIntent.RequestChangePin -> localState.update {

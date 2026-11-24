@@ -95,5 +95,7 @@ sealed interface SecurityEffect {
         val title: String,
     ) : SecurityEffect
 
+    data object RefreshWidgets : SecurityEffect
+
     data class ShowMessage(val message: String) : SecurityEffect
 }
