@@ -8,6 +8,7 @@ import com.example.student_wallet.core.domain.model.UserSettings
 import com.example.student_wallet.core.domain.repository.SettingsRepository
 import com.example.student_wallet.core.domain.repository.TransactionRepository
 import com.example.student_wallet.feature.security.di.securityModule
+import com.example.student_wallet.feature.security.widget.QuickAddWidgetViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
@@ -97,7 +98,9 @@ class AuditJournalViewModelTest {
         }
         try {
             val resolved = koinApp.koin.get<AuditJournalViewModel>()
+            val resolvedQuickAdd = koinApp.koin.get<QuickAddWidgetViewModel>()
             assertEquals(YearMonth.now(), resolved.uiState.value.selectedMonth)
+            assertEquals("", resolvedQuickAdd.uiState.value.amountDigits)
         } finally {
             koinApp.close()
         }
