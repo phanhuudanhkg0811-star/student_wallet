@@ -27,6 +27,7 @@ dependencies {
     implementation(project(":core"))
     implementation(libs.androidx.biometric)
     implementation(libs.androidx.datastore.preferences)
+    implementation(libs.androidx.room.runtime)
     testImplementation(libs.junit)
     testImplementation(libs.kotlinx.coroutines.test)
 }

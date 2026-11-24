@@ -4,6 +4,7 @@ import android.app.Activity
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContract
 import androidx.compose.foundation.BorderStroke
@@ -27,7 +28,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronRight
-import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.DarkMode
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.Insights
@@ -83,6 +83,9 @@ import com.example.student_wallet.core.ui.theme.financeColors
 import com.example.student_wallet.feature.security.biometric.BiometricAvailability
 import com.example.student_wallet.feature.security.biometric.BiometricPromptHelper
 import com.example.student_wallet.feature.security.ui.AppLockSettingsCard
+import com.example.student_wallet.feature.security.ui.BackupCreateSheet
+import com.example.student_wallet.feature.security.ui.BackupRestoreCard
+import com.example.student_wallet.feature.security.ui.BackupRestoreSheet
 import com.example.student_wallet.feature.security.ui.PinSetupSheet
 import org.koin.compose.viewmodel.koinViewModel
 import java.io.File
@@ -121,11 +124,41 @@ fun SecurityScreen(
         }
     }
 
+    val createBackupLauncher = rememberLauncherForActivityResult(
+        contract = CreateBackupDocumentContract,
+    ) { uri ->
+        if (uri != null) {
+            viewModel.onIntent(
+                SecurityIntent.BackupToStream { context.contentResolver.openOutputStream(uri) },
+            )
+        }
+    }
+
+    val openBackupLauncher = rememberLauncherForActivityResult(
+        contract = OpenBackupDocumentContract,
+    ) { uri ->
+        if (uri != null) {
+            val fileName = resolveUriDisplayName(context, uri)
+            viewModel.onIntent(
+                SecurityIntent.BackupFilePicked(
+                    fileName = fileName,
+                    openStream = { context.contentResolver.openInputStream(uri) },
+                ),
+            )
+        }
+    }
+
     LaunchedEffect(viewModel) {
         viewModel.effects.collect { effect ->
             when (effect) {
                 is SecurityEffect.LaunchCreateDocument -> {
                     createDocumentLauncher.launch(effect)
+                }
+                is SecurityEffect.LaunchCreateBackupDocument -> {
+                    createBackupLauncher.launch(effect.suggestedFileName)
+                }
+                SecurityEffect.LaunchOpenBackupDocument -> {
+                    openBackupLauncher.launch(Unit)
                 }
                 is SecurityEffect.ShareExportedFile -> {
                     shareExportFile(context, effect.file, effect.mimeType, effect.title)
@@ -160,6 +193,36 @@ fun SecurityScreen(
                 viewModel.onIntent(SecurityIntent.SubmitDisablePin(currentPin))
             },
         )
+    }
+
+    when (val backupDialog = uiState.activeBackupDialog) {
+        BackupDialogState.CreatePassphrase -> {
+            BackupCreateSheet(
+                isBusy = uiState.isBackupBusy,
+                externalError = uiState.backupDialogError,
+                onDismiss = { viewModel.onIntent(SecurityIntent.DismissBackupDialog) },
+                onSaveToDevice = { passphrase ->
+                    viewModel.onIntent(SecurityIntent.RequestSaveBackup(passphrase))
+                },
+                onShareFile = { passphrase ->
+                    viewModel.onIntent(SecurityIntent.RequestShareBackup(passphrase))
+                },
+            )
+        }
+        is BackupDialogState.RestoreFlow -> {
+            BackupRestoreSheet(
+                fileName = backupDialog.fileName,
+                preview = backupDialog.preview,
+                isBusy = uiState.isBackupBusy,
+                externalError = uiState.backupDialogError,
+                onDismiss = { viewModel.onIntent(SecurityIntent.DismissBackupDialog) },
+                onInspectWithPassphrase = { passphrase ->
+                    viewModel.onIntent(SecurityIntent.InspectRestoreWithPassphrase(passphrase))
+                },
+                onConfirmRestore = { viewModel.onIntent(SecurityIntent.ConfirmRestoreBackup) },
+            )
+        }
+        null -> Unit
     }
 }
 
@@ -232,6 +295,17 @@ internal fun SecurityContent(
                 ExportReportCard(
                     uiState = uiState,
                     onIntent = onIntent,
+                )
+            }
+
+            item {
+                BackupRestoreCard(
+                    transactionCount = uiState.totalTransactionCount,
+                    isBusy = uiState.isBackupBusy,
+                    onCreateBackupClick = { onIntent(SecurityIntent.OpenCreateBackupSheet) },
+                    onRestoreBackupClick = { onIntent(SecurityIntent.RequestOpenBackupPicker) },
+                    cardContainer = { SettingsCard(content = it) },
+                    badgeIcon = { icon, container, content -> IconBadge(icon, container, content) },
                 )
             }
 
@@ -547,54 +621,6 @@ private fun SecurityRoadmapCard(onOpenAuditJournal: () -> Unit) {
                     tint = MaterialTheme.colorScheme.primary,
                 )
             }
-            HorizontalDivider(color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f))
-            RoadmapFeatureRow(
-                icon = Icons.Filled.CloudUpload,
-                title = "Sao lưu & Khôi phục mã hóa (.wallet)",
-                subtitle = "Feature 29 · AES-256 CBC + SHA-256 checksum",
-            )
-        }
-    }
-}
-
-@Composable
-private fun RoadmapFeatureRow(
-    icon: ImageVector,
-    title: String,
-    subtitle: String,
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
-    ) {
-        IconBadge(
-            icon = icon,
-            containerColor = MaterialTheme.colorScheme.surfaceVariant,
-            contentColor = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = title,
-                style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.SemiBold),
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-            Text(
-                text = subtitle,
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-        }
-        Surface(
-            shape = RoundedCornerShape(10.dp),
-            color = MaterialTheme.colorScheme.secondaryContainer,
-        ) {
-            Text(
-                text = "Sắp có",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSecondaryContainer,
-                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-            )
         }
     }
 }
@@ -715,6 +741,40 @@ private object CreateExportDocumentContract :
         if (resultCode == Activity.RESULT_OK) intent?.data else null
 }
 
+private object CreateBackupDocumentContract : ActivityResultContract<String, Uri?>() {
+    override fun createIntent(context: Context, input: String): Intent =
+        Intent(Intent.ACTION_CREATE_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "application/octet-stream"
+            putExtra(Intent.EXTRA_TITLE, input)
+        }
+
+    override fun parseResult(resultCode: Int, intent: Intent?): Uri? =
+        if (resultCode == Activity.RESULT_OK) intent?.data else null
+}
+
+private object OpenBackupDocumentContract : ActivityResultContract<Unit, Uri?>() {
+    override fun createIntent(context: Context, input: Unit): Intent =
+        Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+        }
+
+    override fun parseResult(resultCode: Int, intent: Intent?): Uri? =
+        if (resultCode == Activity.RESULT_OK) intent?.data else null
+}
+
+private fun resolveUriDisplayName(context: Context, uri: Uri): String {
+    val queried = runCatching {
+        context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+            ?.use { cursor ->
+                if (cursor.moveToFirst()) cursor.getString(0) else null
+            }
+    }.getOrNull()
+    if (!queried.isNullOrBlank()) return queried
+    return uri.lastPathSegment?.substringAfterLast('/')?.takeIf { it.isNotBlank() } ?: "backup.wallet"
+}
+
 @Composable
 private fun StatMiniColumn(
     label: String,
@@ -767,7 +827,7 @@ private fun shareExportFile(
         putExtra(Intent.EXTRA_SUBJECT, title)
         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
     }
-    context.startActivity(Intent.createChooser(shareIntent, "Chia sẻ báo cáo"))
+    context.startActivity(Intent.createChooser(shareIntent, "Chia sẻ tệp"))
 }
 
 @Preview(showBackground = true)
