@@ -8,6 +8,12 @@
     <string name="security_backup_section">Sao lưu &amp; Khôi phục (.wallet)</string>
     <string name="security_backup_create">Sao lưu (.wallet)</string>
     <string name="security_backup_restore">Khôi phục</string>
+    <string name="security_widget_section">Tiện ích màn hình chính (Widget)</string>
+    <string name="security_widget_label">StudentWallet · Số dư &amp; Chi nhanh</string>
+    <string name="security_widget_description">Xem số dư, chi tiêu hôm nay, cảnh báo ngân sách (2x2, 4x1, 4x2) và ghi nhanh giao dịch</string>
+    <string name="security_widget_loading_hint">Đang tải số dư...</string>
+    <string name="security_widget_pin_action">Ghim Widget</string>
+    <string name="security_widget_quick_add_test">Thử Quick Add</string>
     <string name="security_roadmap_section">Kỷ luật tài chính</string>
     <string name="security_save_file">Lưu về máy</string>
     <string name="security_share_file">Chia sẻ</string>

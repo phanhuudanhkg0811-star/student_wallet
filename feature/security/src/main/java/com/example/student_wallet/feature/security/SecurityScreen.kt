@@ -86,7 +86,12 @@ import com.example.student_wallet.feature.security.ui.AppLockSettingsCard
 import com.example.student_wallet.feature.security.ui.BackupCreateSheet
 import com.example.student_wallet.feature.security.ui.BackupRestoreCard
 import com.example.student_wallet.feature.security.ui.BackupRestoreSheet
+import com.example.student_wallet.feature.security.ui.HomeWidgetCard
 import com.example.student_wallet.feature.security.ui.PinSetupSheet
+import com.example.student_wallet.feature.security.ui.launchQuickAddDialog
+import com.example.student_wallet.feature.security.ui.requestPinWalletWidget
+import com.example.student_wallet.feature.security.widget.WalletWidgetUpdater
+import kotlinx.coroutines.launch
 import org.koin.compose.viewmodel.koinViewModel
 import java.io.File
 
@@ -98,6 +103,7 @@ fun SecurityScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
+    val coroutineScope = androidx.compose.runtime.rememberCoroutineScope()
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     var biometricAvailability by remember(context) {
@@ -163,6 +169,9 @@ fun SecurityScreen(
                 is SecurityEffect.ShareExportedFile -> {
                     shareExportFile(context, effect.file, effect.mimeType, effect.title)
                 }
+                SecurityEffect.RefreshWidgets -> {
+                    WalletWidgetUpdater.refreshAll(context)
+                }
                 is SecurityEffect.ShowMessage -> {
                     snackbarHostState.showSnackbar(effect.message)
                 }
@@ -175,6 +184,16 @@ fun SecurityScreen(
         biometricAvailability = biometricAvailability,
         onIntent = viewModel::onIntent,
         onOpenAuditJournal = onOpenAuditJournal,
+        onPinWidgetClick = {
+            if (!requestPinWalletWidget(context)) {
+                coroutineScope.launch {
+                    snackbarHostState.showSnackbar(
+                        "Trình khởi chạy không hỗ trợ ghim tự động. Giữ màn hình chính → Widget → StudentWallet.",
+                    )
+                }
+            }
+        },
+        onQuickAddTestClick = { launchQuickAddDialog(context) },
         snackbarHostState = snackbarHostState,
         modifier = modifier,
     )
@@ -234,6 +253,8 @@ internal fun SecurityContent(
     onOpenAuditJournal: () -> Unit,
     snackbarHostState: SnackbarHostState,
     modifier: Modifier = Modifier,
+    onPinWidgetClick: () -> Unit = {},
+    onQuickAddTestClick: () -> Unit = {},
 ) {
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -304,6 +325,15 @@ internal fun SecurityContent(
                     isBusy = uiState.isBackupBusy,
                     onCreateBackupClick = { onIntent(SecurityIntent.OpenCreateBackupSheet) },
                     onRestoreBackupClick = { onIntent(SecurityIntent.RequestOpenBackupPicker) },
+                    cardContainer = { SettingsCard(content = it) },
+                    badgeIcon = { icon, container, content -> IconBadge(icon, container, content) },
+                )
+            }
+
+            item {
+                HomeWidgetCard(
+                    onPinWidgetClick = onPinWidgetClick,
+                    onQuickAddTestClick = onQuickAddTestClick,
                     cardContainer = { SettingsCard(content = it) },
                     badgeIcon = { icon, container, content -> IconBadge(icon, container, content) },
                 )

@@ -11,6 +11,8 @@ import com.example.student_wallet.feature.security.crypto.SecretProtector
 import com.example.student_wallet.feature.security.data.DataStoreSecurityLockStore
 import com.example.student_wallet.feature.security.data.SecurityLockStore
 import com.example.student_wallet.feature.security.lock.AppLockManager
+import com.example.student_wallet.feature.security.widget.QuickAddWidgetViewModel
+import com.example.student_wallet.feature.security.widget.WalletWidgetAutoSync
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -31,6 +33,15 @@ val securityModule = module {
         )
     }
     single {
+        WalletWidgetAutoSync(
+            context = androidContext(),
+            transactionRepository = get(),
+            settingsRepository = get(),
+            scope = CoroutineScope(SupervisorJob() + Dispatchers.IO),
+        )
+    }
+    single {
+        get<WalletWidgetAutoSync>().start()
         AppLockManager(
             lockStore = get(),
             pinHasher = get(),
@@ -41,6 +52,7 @@ val securityModule = module {
     }
 
     viewModelOf(::SecurityViewModel)
+    viewModelOf(::QuickAddWidgetViewModel)
     viewModel {
         AuditJournalViewModel(
             transactionRepository = get(),

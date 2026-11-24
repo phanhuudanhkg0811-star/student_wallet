@@ -8,6 +8,7 @@ import androidx.sqlite.db.SupportSQLiteStatement
 import com.example.student_wallet.core.data.local.AppDatabase
 import com.example.student_wallet.core.domain.model.UserSettings
 import com.example.student_wallet.core.domain.repository.SettingsRepository
+import com.example.student_wallet.feature.security.widget.WalletWidgetUpdater
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
@@ -186,6 +187,7 @@ class AndroidWalletBackupManager(
             settingsRepository.setCurrency(session.extracted.settings.currency)
             settingsRepository.setDynamicColor(session.extracted.settings.dynamicColor)
             appDatabase.invalidationTracker.refreshAsync()
+            WalletWidgetUpdater.refreshAll(context)
 
             RestoreSummary(
                 transactionCount = session.preview.transactionCount,
