@@ -4,14 +4,25 @@ import com.example.student_wallet.core.domain.export.ExportFormat
 import com.example.student_wallet.core.domain.model.CurrencyOption
 import com.example.student_wallet.core.domain.model.ThemeMode
 import com.example.student_wallet.core.domain.model.UserSettings
+import com.example.student_wallet.feature.security.backup.BackupPreviewInfo
 import com.example.student_wallet.feature.security.lock.AppLockState
 import java.io.File
+import java.io.InputStream
 import java.io.OutputStream
 
 enum class PinDialogMode {
     CREATE,
     CHANGE,
     DISABLE,
+}
+
+sealed interface BackupDialogState {
+    data object CreatePassphrase : BackupDialogState
+
+    data class RestoreFlow(
+        val fileName: String,
+        val preview: BackupPreviewInfo? = null,
+    ) : BackupDialogState
 }
 
 data class SecurityUiState(
@@ -24,6 +35,10 @@ data class SecurityUiState(
     val selectedFormat: ExportFormat = ExportFormat.PDF,
     val periodStats: PeriodStats = PeriodStats(0, 0L, 0L, 0L),
     val isExporting: Boolean = false,
+    val totalTransactionCount: Int = 0,
+    val activeBackupDialog: BackupDialogState? = null,
+    val backupDialogError: String? = null,
+    val isBackupBusy: Boolean = false,
 )
 
 sealed interface SecurityIntent {
@@ -46,6 +61,20 @@ sealed interface SecurityIntent {
     data object RequestSaveExport : SecurityIntent
     data object RequestShareExport : SecurityIntent
     data class ExportToStream(val openStream: () -> OutputStream?) : SecurityIntent
+
+    data object OpenCreateBackupSheet : SecurityIntent
+    data object RequestOpenBackupPicker : SecurityIntent
+    data class RequestSaveBackup(val passphrase: String) : SecurityIntent
+    data class RequestShareBackup(val passphrase: String) : SecurityIntent
+    data class BackupToStream(val openStream: () -> OutputStream?) : SecurityIntent
+    data class BackupFilePicked(
+        val fileName: String,
+        val openStream: () -> InputStream?,
+    ) : SecurityIntent
+
+    data class InspectRestoreWithPassphrase(val passphrase: String) : SecurityIntent
+    data object ConfirmRestoreBackup : SecurityIntent
+    data object DismissBackupDialog : SecurityIntent
 }
 
 sealed interface SecurityEffect {
@@ -53,6 +82,12 @@ sealed interface SecurityEffect {
         val suggestedFileName: String,
         val mimeType: String,
     ) : SecurityEffect
+
+    data class LaunchCreateBackupDocument(
+        val suggestedFileName: String,
+    ) : SecurityEffect
+
+    data object LaunchOpenBackupDocument : SecurityEffect
 
     data class ShareExportedFile(
         val file: File,

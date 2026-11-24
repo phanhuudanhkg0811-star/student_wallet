@@ -9,6 +9,7 @@ import com.example.student_wallet.core.domain.model.Transaction
 import com.example.student_wallet.core.domain.model.UserSettings
 import com.example.student_wallet.core.domain.repository.SettingsRepository
 import com.example.student_wallet.core.domain.repository.TransactionRepository
+import com.example.student_wallet.feature.security.backup.WalletBackupCoordinator
 import com.example.student_wallet.feature.security.lock.AppLockManager
 import com.example.student_wallet.feature.security.lock.AppLockState
 import com.example.student_wallet.feature.security.lock.PinVerifyResult
@@ -21,16 +22,23 @@ import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import java.io.InputStream
+import java.io.OutputStream
+import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 
 class SecurityViewModel(
     private val settingsRepository: SettingsRepository,
     transactionRepository: TransactionRepository,
     private val reportExporter: ReportExporter,
     private val appLockManager: AppLockManager,
+    private val backupCoordinator: WalletBackupCoordinator,
 ) : ViewModel() {
 
     private val localState = MutableStateFlow(LocalSecurityState())
     private val latestTransactions = MutableStateFlow<List<Transaction>>(emptyList())
+    private var pendingBackupPassphrase: String? = null
+    private var pendingRestoreOpenStream: (() -> InputStream?)? = null
 
     private val _effects = Channel<SecurityEffect>(Channel.BUFFERED)
     val effects = _effects.receiveAsFlow()
@@ -53,6 +61,10 @@ class SecurityViewModel(
             selectedFormat = local.selectedFormat,
             periodStats = PersonalReportBuilder.summarize(filtered),
             isExporting = local.isExporting,
+            totalTransactionCount = transactions.count { !it.isDeleted },
+            activeBackupDialog = local.activeBackupDialog,
+            backupDialogError = local.backupDialogError,
+            isBackupBusy = local.isBackupBusy,
         )
     }.stateIn(
         scope = viewModelScope,
@@ -93,7 +105,24 @@ class SecurityViewModel(
             SecurityIntent.RequestSaveExport -> requestSaveExport()
             SecurityIntent.RequestShareExport -> requestShareExport()
             is SecurityIntent.ExportToStream -> exportToStream(intent.openStream)
+            SecurityIntent.OpenCreateBackupSheet -> openCreateBackupSheet()
+            SecurityIntent.RequestOpenBackupPicker -> launchBlock {
+                _effects.send(SecurityEffect.LaunchOpenBackupDocument)
+            }
+            is SecurityIntent.RequestSaveBackup -> requestSaveBackup(intent.passphrase)
+            is SecurityIntent.RequestShareBackup -> requestShareBackup(intent.passphrase)
+            is SecurityIntent.BackupToStream -> backupToStream(intent.openStream)
+            is SecurityIntent.BackupFilePicked -> onBackupFilePicked(intent.fileName, intent.openStream)
+            is SecurityIntent.InspectRestoreWithPassphrase -> inspectRestoreBackup(intent.passphrase)
+            SecurityIntent.ConfirmRestoreBackup -> confirmRestoreBackup()
+            SecurityIntent.DismissBackupDialog -> dismissBackupDialog()
         }
+    }
+
+    override fun onCleared() {
+        pendingBackupPassphrase = null
+        pendingRestoreOpenStream = null
+        backupCoordinator.discardStagedRestore()
     }
 
     private fun launchBlock(block: suspend () -> Unit) {
@@ -250,6 +279,182 @@ class SecurityViewModel(
             currency = settings.currency,
         )
 
+    private fun openCreateBackupSheet() {
+        pendingBackupPassphrase = null
+        pendingRestoreOpenStream = null
+        backupCoordinator.discardStagedRestore()
+        localState.update {
+            it.copy(
+                activeBackupDialog = BackupDialogState.CreatePassphrase,
+                backupDialogError = null,
+                isBackupBusy = false,
+            )
+        }
+    }
+
+    private fun requestSaveBackup(passphrase: String) {
+        pendingBackupPassphrase = passphrase
+        viewModelScope.launch {
+            _effects.send(
+                SecurityEffect.LaunchCreateBackupDocument(
+                    suggestedFileName = suggestedBackupFileName(),
+                ),
+            )
+        }
+    }
+
+    private fun backupToStream(openStream: () -> OutputStream?) {
+        val passphrase = pendingBackupPassphrase
+        pendingBackupPassphrase = null
+        if (passphrase == null) {
+            localState.update {
+                it.copy(backupDialogError = "Phiên đặt mật khẩu đã hết hạn, vui lòng thử lại.")
+            }
+            return
+        }
+        viewModelScope.launch {
+            localState.update { it.copy(isBackupBusy = true, backupDialogError = null) }
+            try {
+                val stream = openStream()
+                if (stream == null) {
+                    localState.update {
+                        it.copy(isBackupBusy = false, backupDialogError = "Không mở được tệp đích để lưu bản sao lưu.")
+                    }
+                    return@launch
+                }
+                stream.use { output ->
+                    backupCoordinator.createBackupToStream(passphrase, output)
+                }
+                localState.update {
+                    it.copy(activeBackupDialog = null, backupDialogError = null, isBackupBusy = false)
+                }
+                _effects.send(SecurityEffect.ShowMessage("Đã tạo bản sao lưu mã hóa .wallet thành công."))
+            } catch (e: Exception) {
+                localState.update {
+                    it.copy(
+                        isBackupBusy = false,
+                        backupDialogError = "Sao lưu thất bại: ${e.message ?: "Lỗi không xác định"}",
+                    )
+                }
+            }
+        }
+    }
+
+    private fun requestShareBackup(passphrase: String) {
+        pendingBackupPassphrase = null
+        viewModelScope.launch {
+            localState.update { it.copy(isBackupBusy = true, backupDialogError = null) }
+            try {
+                val file = backupCoordinator.createBackupCacheFile(
+                    passphrase = passphrase,
+                    suggestedFileName = suggestedBackupFileName(),
+                )
+                localState.update {
+                    it.copy(activeBackupDialog = null, backupDialogError = null, isBackupBusy = false)
+                }
+                _effects.send(
+                    SecurityEffect.ShareExportedFile(
+                        file = file,
+                        mimeType = "application/octet-stream",
+                        title = "Bản sao lưu StudentWallet (.wallet)",
+                    ),
+                )
+            } catch (e: Exception) {
+                localState.update {
+                    it.copy(
+                        isBackupBusy = false,
+                        backupDialogError = "Không thể tạo tệp chia sẻ: ${e.message ?: "Lỗi không xác định"}",
+                    )
+                }
+            }
+        }
+    }
+
+    private fun onBackupFilePicked(fileName: String, openStream: () -> InputStream?) {
+        pendingBackupPassphrase = null
+        pendingRestoreOpenStream = openStream
+        backupCoordinator.discardStagedRestore()
+        localState.update {
+            it.copy(
+                activeBackupDialog = BackupDialogState.RestoreFlow(fileName = fileName, preview = null),
+                backupDialogError = null,
+                isBackupBusy = false,
+            )
+        }
+    }
+
+    private fun inspectRestoreBackup(passphrase: String) {
+        val currentRestore = uiState.value.activeBackupDialog as? BackupDialogState.RestoreFlow ?: return
+        val openStream = pendingRestoreOpenStream
+        if (openStream == null) {
+            localState.update {
+                it.copy(backupDialogError = "Không truy cập được tệp .wallet đã chọn, vui lòng chọn lại.")
+            }
+            return
+        }
+        viewModelScope.launch {
+            localState.update { it.copy(isBackupBusy = true, backupDialogError = null) }
+            try {
+                val preview = backupCoordinator.inspectBackupFile(
+                    fileName = currentRestore.fileName,
+                    passphrase = passphrase,
+                    openInputStream = openStream,
+                )
+                localState.update {
+                    it.copy(
+                        activeBackupDialog = currentRestore.copy(preview = preview),
+                        backupDialogError = null,
+                        isBackupBusy = false,
+                    )
+                }
+            } catch (e: Exception) {
+                localState.update {
+                    it.copy(
+                        isBackupBusy = false,
+                        backupDialogError = e.message ?: "Không thể giải mã tệp .wallet.",
+                    )
+                }
+            }
+        }
+    }
+
+    private fun confirmRestoreBackup() {
+        viewModelScope.launch {
+            localState.update { it.copy(isBackupBusy = true, backupDialogError = null) }
+            try {
+                val summary = backupCoordinator.confirmStagedRestore()
+                pendingRestoreOpenStream = null
+                localState.update {
+                    it.copy(activeBackupDialog = null, backupDialogError = null, isBackupBusy = false)
+                }
+                _effects.send(
+                    SecurityEffect.ShowMessage(
+                        "Khôi phục thành công ${summary.transactionCount} giao dịch và ${summary.receiptCount} ảnh hóa đơn.",
+                    ),
+                )
+            } catch (e: Exception) {
+                localState.update {
+                    it.copy(
+                        isBackupBusy = false,
+                        backupDialogError = e.message ?: "Khôi phục dữ liệu thất bại.",
+                    )
+                }
+            }
+        }
+    }
+
+    private fun dismissBackupDialog() {
+        pendingBackupPassphrase = null
+        pendingRestoreOpenStream = null
+        backupCoordinator.discardStagedRestore()
+        localState.update {
+            it.copy(activeBackupDialog = null, backupDialogError = null, isBackupBusy = false)
+        }
+    }
+
+    private fun suggestedBackupFileName(): String =
+        "student_wallet_${LocalDateTime.now().format(BACKUP_FILE_TIME_FORMATTER)}.wallet"
+
     private data class LocalSecurityState(
         val activePinDialog: PinDialogMode? = null,
         val pinDialogError: String? = null,
@@ -257,5 +462,12 @@ class SecurityViewModel(
         val selectedPeriod: ReportPeriod = ReportPeriod.THIS_MONTH,
         val selectedFormat: ExportFormat = ExportFormat.PDF,
         val isExporting: Boolean = false,
+        val activeBackupDialog: BackupDialogState? = null,
+        val backupDialogError: String? = null,
+        val isBackupBusy: Boolean = false,
     )
+
+    private companion object {
+        val BACKUP_FILE_TIME_FORMATTER: DateTimeFormatter = DateTimeFormatter.ofPattern("yyyyMMdd_HHmm")
+    }
 }

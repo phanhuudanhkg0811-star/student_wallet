@@ -3,6 +3,8 @@ package com.example.student_wallet.feature.security.di
 import android.os.SystemClock
 import com.example.student_wallet.feature.security.SecurityViewModel
 import com.example.student_wallet.feature.security.audit.AuditJournalViewModel
+import com.example.student_wallet.feature.security.backup.AndroidWalletBackupManager
+import com.example.student_wallet.feature.security.backup.WalletBackupCoordinator
 import com.example.student_wallet.feature.security.crypto.KeystoreSecretProtector
 import com.example.student_wallet.feature.security.crypto.PinHasher
 import com.example.student_wallet.feature.security.crypto.SecretProtector
@@ -21,6 +23,13 @@ val securityModule = module {
     single { PinHasher() }
     single<SecretProtector> { KeystoreSecretProtector() }
     single<SecurityLockStore> { DataStoreSecurityLockStore(context = androidContext()) }
+    single<WalletBackupCoordinator> {
+        AndroidWalletBackupManager(
+            context = androidContext(),
+            appDatabase = get(),
+            settingsRepository = get(),
+        )
+    }
     single {
         AppLockManager(
             lockStore = get(),

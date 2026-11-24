@@ -12,6 +12,12 @@ import com.example.student_wallet.core.domain.model.TransactionType
 import com.example.student_wallet.core.domain.model.UserSettings
 import com.example.student_wallet.core.domain.repository.SettingsRepository
 import com.example.student_wallet.core.domain.repository.TransactionRepository
+import com.example.student_wallet.feature.security.backup.BackupPreviewInfo
+import com.example.student_wallet.feature.security.backup.BackupStats
+import com.example.student_wallet.feature.security.backup.RestoreSummary
+import com.example.student_wallet.feature.security.backup.WalletBackupCoordinator
+import com.example.student_wallet.feature.security.backup.WalletBackupErrorReason
+import com.example.student_wallet.feature.security.backup.WalletBackupException
 import com.example.student_wallet.feature.security.crypto.PinHasher
 import com.example.student_wallet.feature.security.lock.AppLockManager
 import com.example.student_wallet.feature.security.lock.FakeSecretProtector
@@ -33,12 +39,15 @@ import kotlinx.coroutines.test.setMain
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
+import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.InputStream
 import java.io.OutputStream
 import java.nio.charset.StandardCharsets
 
@@ -74,7 +83,13 @@ class SecurityViewModelTest {
         val settingsRepo = FakeSettingsRepository()
         val txRepo = FakeTransactionRepository()
         val exporter = FakeReportExporter()
-        val viewModel = SecurityViewModel(settingsRepo, txRepo, exporter, createAppLockManager())
+        val viewModel = SecurityViewModel(
+            settingsRepo,
+            txRepo,
+            exporter,
+            createAppLockManager(),
+            FakeWalletBackupCoordinator(),
+        )
 
         val collectJob = launch { viewModel.uiState.collect {} }
         advanceUntilIdle()
@@ -97,6 +112,7 @@ class SecurityViewModelTest {
             FakeTransactionRepository(),
             FakeReportExporter(),
             createAppLockManager(),
+            FakeWalletBackupCoordinator(),
         )
 
         val collectJob = launch { viewModel.uiState.collect {} }
@@ -143,7 +159,13 @@ class SecurityViewModelTest {
             ),
         )
         val exporter = FakeReportExporter()
-        val viewModel = SecurityViewModel(settingsRepo, txRepo, exporter, createAppLockManager())
+        val viewModel = SecurityViewModel(
+            settingsRepo,
+            txRepo,
+            exporter,
+            createAppLockManager(),
+            FakeWalletBackupCoordinator(),
+        )
 
         val collectJob = launch { viewModel.uiState.collect {} }
         advanceUntilIdle()
@@ -163,6 +185,85 @@ class SecurityViewModelTest {
         val messageEffect = viewModel.effects.first() as SecurityEffect.ShowMessage
         assertTrue(messageEffect.message.contains("thành công"))
         assertEquals("CSV:Báo cáo", String(buffer.toByteArray(), StandardCharsets.UTF_8))
+        collectJob.cancel()
+    }
+
+    @Test
+    fun `backup save flow launches wallet document and writes encrypted bytes`() = runTest(testDispatcher) {
+        val backupCoordinator = FakeWalletBackupCoordinator()
+        val viewModel = SecurityViewModel(
+            FakeSettingsRepository(),
+            FakeTransactionRepository(),
+            FakeReportExporter(),
+            createAppLockManager(),
+            backupCoordinator,
+        )
+
+        val collectJob = launch { viewModel.uiState.collect {} }
+        advanceUntilIdle()
+
+        viewModel.onIntent(SecurityIntent.OpenCreateBackupSheet)
+        advanceUntilIdle()
+        assertEquals(BackupDialogState.CreatePassphrase, viewModel.uiState.value.activeBackupDialog)
+
+        viewModel.onIntent(SecurityIntent.RequestSaveBackup("Secret#2026"))
+        val createEffect = viewModel.effects.first() as SecurityEffect.LaunchCreateBackupDocument
+        assertTrue(createEffect.suggestedFileName.endsWith(".wallet"))
+
+        val buffer = ByteArrayOutputStream()
+        viewModel.onIntent(SecurityIntent.BackupToStream { buffer })
+        advanceUntilIdle()
+
+        val msg = viewModel.effects.first() as SecurityEffect.ShowMessage
+        assertTrue(msg.message.contains("thành công"))
+        assertNull(viewModel.uiState.value.activeBackupDialog)
+        assertEquals("WALLET:Secret#2026", String(buffer.toByteArray(), StandardCharsets.UTF_8))
+        collectJob.cancel()
+    }
+
+    @Test
+    fun `two-step restore verifies passphrase shows preview and confirms replacement`() = runTest(testDispatcher) {
+        val backupCoordinator = FakeWalletBackupCoordinator(expectedPassphrase = "Pass@999")
+        val viewModel = SecurityViewModel(
+            FakeSettingsRepository(),
+            FakeTransactionRepository(),
+            FakeReportExporter(),
+            createAppLockManager(),
+            backupCoordinator,
+        )
+
+        val collectJob = launch { viewModel.uiState.collect {} }
+        advanceUntilIdle()
+
+        viewModel.onIntent(
+            SecurityIntent.BackupFilePicked(
+                fileName = "backup_nov.wallet",
+                openStream = { ByteArrayInputStream("encrypted".toByteArray()) },
+            ),
+        )
+        advanceUntilIdle()
+
+        val initialDialog = viewModel.uiState.value.activeBackupDialog as BackupDialogState.RestoreFlow
+        assertEquals("backup_nov.wallet", initialDialog.fileName)
+        assertNull(initialDialog.preview)
+
+        viewModel.onIntent(SecurityIntent.InspectRestoreWithPassphrase("WrongPass"))
+        advanceUntilIdle()
+        assertNotNull(viewModel.uiState.value.backupDialogError)
+        assertNull((viewModel.uiState.value.activeBackupDialog as BackupDialogState.RestoreFlow).preview)
+
+        viewModel.onIntent(SecurityIntent.InspectRestoreWithPassphrase("Pass@999"))
+        advanceUntilIdle()
+        assertNull(viewModel.uiState.value.backupDialogError)
+        val previewDialog = viewModel.uiState.value.activeBackupDialog as BackupDialogState.RestoreFlow
+        assertEquals(18, previewDialog.preview?.transactionCount)
+
+        viewModel.onIntent(SecurityIntent.ConfirmRestoreBackup)
+        advanceUntilIdle()
+        assertTrue(backupCoordinator.confirmedRestore)
+        assertNull(viewModel.uiState.value.activeBackupDialog)
+        val msg = viewModel.effects.first() as SecurityEffect.ShowMessage
+        assertTrue(msg.message.contains("18 giao dịch"))
         collectJob.cancel()
     }
 
@@ -203,5 +304,56 @@ class SecurityViewModelTest {
             format: ExportFormat,
             fileNamePrefix: String,
         ): File = File("${fileNamePrefix}.${format.extension}")
+    }
+
+    private class FakeWalletBackupCoordinator(
+        private val expectedPassphrase: String = "Secret#2026",
+    ) : WalletBackupCoordinator {
+        var confirmedRestore = false
+        private var hasStaged = false
+
+        override suspend fun getCurrentBackupStats(): BackupStats = BackupStats(18, 7, 2)
+
+        override suspend fun createBackupToStream(passphrase: String, outputStream: OutputStream) {
+            outputStream.write("WALLET:$passphrase".toByteArray(StandardCharsets.UTF_8))
+        }
+
+        override suspend fun createBackupCacheFile(passphrase: String, suggestedFileName: String): File =
+            File(suggestedFileName)
+
+        override suspend fun inspectBackupFile(
+            fileName: String,
+            passphrase: String,
+            openInputStream: () -> InputStream?,
+        ): BackupPreviewInfo {
+            if (passphrase != expectedPassphrase) {
+                throw WalletBackupException(
+                    WalletBackupErrorReason.WRONG_PASSWORD,
+                    "Mật khẩu giải mã không đúng.",
+                )
+            }
+            hasStaged = true
+            return BackupPreviewInfo(
+                fileName = fileName,
+                createdAtEpochMillis = 1_764_000_000_000L,
+                dbVersion = 1,
+                transactionCount = 18,
+                categoryCount = 7,
+                receiptCount = 2,
+                checksumShortHex = "abcdef123456",
+                settings = UserSettings(),
+            )
+        }
+
+        override suspend fun confirmStagedRestore(): RestoreSummary {
+            check(hasStaged)
+            confirmedRestore = true
+            hasStaged = false
+            return RestoreSummary(18, 7, 2)
+        }
+
+        override fun discardStagedRestore() {
+            hasStaged = false
+        }
     }
 }
